@@ -160,7 +160,7 @@ class USD2RialsUpdater:
             price_change, arrow = self.calculate_price_change(current_price, int(previous_price) if previous_price else None)
             
             # ایجاد متن README
-            readme_content = f"""# 📈 آرشیو قیمت دلار به ریال
+            readme_content = f"""# آرشیو قیمت دلار به ریال
 
 ## 📊 آخرین اطلاعات
 
