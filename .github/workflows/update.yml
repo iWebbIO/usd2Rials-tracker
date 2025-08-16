@@ -35,6 +35,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: daily update"
+            git commit -m "daily update done"
             git push
           fi
