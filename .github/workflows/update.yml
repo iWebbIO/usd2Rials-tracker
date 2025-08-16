@@ -1,0 +1,40 @@
+name: Update USD Price
+
+on:
+  schedule:
+    - cron: '30 7 * * *'  # 11:00 Asia/Tehran (UTC+3:30/4:30) -> using 05:30 UTC approximates 09:00 during DST
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run updater script
+        run: |
+          python update_price.py
+
+      - name: Commit and push changes
+        if: ${{ success() }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add USD2Rials.csv README.md || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: daily update"
+            git push
+          fi
