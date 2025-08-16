@@ -48,9 +48,8 @@ class USD2RialsUpdater:
             except Exception:
                 parsed = None
         if parsed:
--            return f"{parsed.day}/{parsed.month}/{parsed.year}"
-+            return f"{parsed.month}/{parsed.day}/{parsed.year}"
-         return date_str
+            return f"{parsed.month}/{parsed.day}/{parsed.year}"
+        return date_str
 
     def fetch_latest_price(self):
         """از وبسایت tgju آخرین قیمت دلار را دریافت می‌کند"""
@@ -79,8 +78,7 @@ class USD2RialsUpdater:
             min_price_text = cells[1].get_text(strip=True)  # کمترین قیمت
             max_price_text = cells[2].get_text(strip=True)  # بیشترین قیمت
             raw_gregorian_date = cells[6].get_text(strip=True)  # تاریخ میلادی (خام از سایت)
--            gregorian_date = self.normalize_gregorian_date(raw_gregorian_date)  # نرمال‌سازی به Day/Month/Year
-+            gregorian_date = self.normalize_gregorian_date(raw_gregorian_date)  # نرمال‌سازی به Month/Day/Year (M/D/YYYY)
+            gregorian_date = self.normalize_gregorian_date(raw_gregorian_date)  # نرمال‌سازی به Month/Day/Year (M/D/YYYY)
             persian_date = cells[7].get_text(strip=True)    # تاریخ شمسی
             
             # تبدیل قیمت‌ها به عدد
