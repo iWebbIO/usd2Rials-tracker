@@ -7,6 +7,7 @@ import csv
 import os
 from datetime import datetime
 import re
+import json
 
 class USD2RialsUpdater:
     def __init__(self, csv_file_path="USD2Rials.csv"):
@@ -150,51 +151,119 @@ class USD2RialsUpdater:
             return change, "↘️"
         else:
             return 0, "➡️"
+
+    # --- JSON helpers ---
+    def to_iso_date(self, date_gr: str) -> str:
+        """تبدیل تاریخ میلادی (M/D/YYYY و انواع مشابه) به ISO 8601 (YYYY-MM-DD)."""
+        if not date_gr:
+            return ""
+        norm = self.normalize_gregorian_date(date_gr)
+        try:
+            dt = datetime.strptime(norm, "%m/%d/%Y")
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            try:
+                parts = re.split(r"[/-]", norm)
+                if len(parts) == 3:
+                    m, d, y = int(parts[0]), int(parts[1]), int(parts[2])
+                    return f"{y:04d}-{m:02d}-{d:02d}"
+            except Exception:
+                pass
+        return ""
+
+    def regenerate_json_files(self, pretty_path: str = "USD2Rials.json", min_path: str = "USD2Rials.min.json") -> bool:
+        """از روی CSV دو خروجی JSON تولید می‌کند:
+        1) فایل غیر فشرده شامل تمام ستون‌ها به صورت آرایه‌ای از آبجکت‌ها
+        2) فایل مینیمال به صورت [["YYYY-MM-DD", price], ...]
+        """
+        try:
+            full_rows = []
+            min_rows = []
+            with open(self.csv_file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    date_pr = (row.get('date_pr') or '').strip()
+                    date_gr = (row.get('date_gr') or '').strip()
+                    source = (row.get('source') or '').strip()
+                    price_str = (row.get('price_avg') or '').replace(',', '').strip()
+                    try:
+                        price = int(price_str)
+                    except Exception:
+                        continue
+                    # آرایه کامل
+                    full_rows.append({
+                        'date_pr': date_pr,
+                        'date_gr': date_gr,
+                        'source': source,
+                        'price_avg': price
+                    })
+                    # آرایه مینیمال
+                    iso = self.to_iso_date(date_gr)
+                    if iso:
+                        min_rows.append([iso, price])
+            # مرتب‌سازی بر اساس تاریخ
+            min_rows.sort(key=lambda x: x[0])
+            full_rows.sort(key=lambda item: (self.to_iso_date(item.get('date_gr', '')) or '9999-99-99'))
+            # نوشتن فایل‌ها
+            with open(min_path, 'w', encoding='utf-8') as fmin:
+                json.dump(min_rows, fmin, ensure_ascii=False, separators=(',', ':'))
+            with open(pretty_path, 'w', encoding='utf-8') as fpretty:
+                json.dump(full_rows, fpretty, ensure_ascii=False, indent=2)
+            print("✅ فایل‌های JSON با موفقیت به‌روزرسانی شدند")
+            return True
+        except Exception as e:
+            print(f"⚠️ خطا در به‌روزرسانی JSON: {e}")
+            return False
     
     def update_readme(self, latest_data, last_entry=None):
-        """فایل README را با آخرین اطلاعات به‌روزرسانی می‌کند"""
+        """فایل README را با آخرین اطلاعات به‌روزرسانی می‌کند (RTL + راست‌چین)"""
         try:
             # محاسبه تغییر قیمت
             current_price = latest_data['price_avg']
             previous_price = last_entry['price_avg'] if last_entry else None
             price_change, arrow = self.calculate_price_change(current_price, int(previous_price) if previous_price else None)
             
-            # ایجاد متن README
-            readme_content = f"""# آرشیو قیمت دلار به ریال
+            # ایجاد محتوای HTML راست‌به‌چپ برای GitHub
+            readme_content = f"""
+<div dir="rtl" align="right">
+  <h1>آرشیو قیمت دلار به ریال</h1>
 
-## 📊 آخرین اطلاعات
-
-**آخرین به‌روزرسانی:** {latest_data['date_pr']} | **قیمت ثبت شده:** {latest_data['price_avg']:,} ریال {arrow}
-
+  <h2>📊 آخرین اطلاعات</h2>
+  <p><strong>آخرین به‌روزرسانی:</strong> {latest_data['date_pr']} | <strong>قیمت ثبت شده:</strong> {latest_data['price_avg']:,} ریال {arrow}</p>
 """
             
             if price_change != 0:
-                readme_content += f"**تغییر نسبت به روز قبل:** {price_change:+,} ریال\n\n"
+                readme_content += f"  <p><strong>تغییر نسبت به روز قبل:</strong> {price_change:+,} ریال</p>\n"
             
-            readme_content += """---
+            readme_content += """
+  <hr />
 
-## 🔍 درباره مخزن
+  <h2>🔍 درباره مخزن</h2>
+  <p>این مخزن حاوی اطلاعات تاریخچه قیمت دلار آمریکا به ریال ایران است که به صورت خودکار و روزانه از سایت معتبر <strong>tgju.org</strong> جمع‌آوری می‌شود.</p>
+  <p>داده‌ها از تاریخ ۷ مهرماه ۱۳۶۰ تا به امروز هستند.</p>
+  <p>داده‌های اولیه این مخزن از سایت <a href="https://d-learn.ir/usd-price/">مدرسه دقیقه</a> برداشته شده‌است و به صورت دوره‌ای این داده‌ در همین لینک بارگذاری می‌شود.</p>
 
-این مخزن حاوی اطلاعات تاریخچه قیمت دلار آمریکا به ریال ایران است که به صورت خودکار و روزانه از سایت معتبر **tgju.org** جمع‌آوری می‌شود.
-داده‌ها از تاریخ ۷ مهرماه ۱۳۶۰ تا به امروز هستند.
+  <h3>📋 توضیحات و فرایند:</h3>
+  <ul>
+    <li><strong>به‌روزرسانی خودکار</strong>: هر روز ساعت ۱۱:۰۰ صبح به وقت تهران</li>
+    <li><strong>تاریخ دوگانه</strong>: شامل تاریخ شمسی و میلادی</li>
+    <li><strong>قیمت میانگین</strong>: محاسبه شده از کمترین و بیشترین قیمت روز</li>
+    <li><strong>نمایش تغییرات</strong>: مقایسه با روز قبل همراه با نشانگر در مخزن</li>
+  </ul>
 
-داده‌های اولیه این مخزن از سایت [مدرسه دقیقه](https://d-learn.ir/usd-price/) برداشته شده‌است و به صورت دوره‌ای این داده‌ در همین لینک بارگذاری می‌شود.
-
-### 📋 توضیحات و فرایند:
-- **به‌روزرسانی خودکار**: هر روز ساعت ۱۱:۰۰ صبح به وقت تهران
-- **تاریخ دوگانه**: شامل تاریخ شمسی و میلادی
-- **قیمت میانگین**: محاسبه شده از کمترین و بیشترین قیمت روز
-- **نمایش تغییرات**: مقایسه با روز قبل همراه با نشانگر در مخزن
-
-### 📊 ساختار داده‌ها:
-| ستون | توضیح |
-|------|-------|
-| `date_pr` | تاریخ شمسی (فارسی) |
-| `date_gr` | تاریخ میلادی (گریگورین) |
-| `source` | منبع اطلاعات (tgju) |
-| `price_avg` | میانگین قیمت روز (ریال) |
-
----
+  <h3>📊 ساختار داده‌ها:</h3>
+  <table>
+    <thead>
+      <tr><th>ستون</th><th>توضیح</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>date_pr</code></td><td>تاریخ شمسی (فارسی)</td></tr>
+      <tr><td><code>date_gr</code></td><td>تاریخ میلادی (گریگورین)</td></tr>
+      <tr><td><code>source</code></td><td>منبع اطلاعات (tgju)</td></tr>
+      <tr><td><code>price_avg</code></td><td>میانگین قیمت روز (ریال)</td></tr>
+    </tbody>
+  </table>
+</div>
 """
             
             with open('README.md', 'w', encoding='utf-8') as f:
@@ -226,11 +295,14 @@ class USD2RialsUpdater:
             if self.append_to_csv(latest_data):
                 print("✅ داده جدید با موفقیت به فایل CSV اضافه شد")
                 
-                # به‌روزرسانی README
+                # به‌روزرسانی README (RTL)
                 if self.update_readme(latest_data, last_entry):
                     print("✅ فایل README با موفقیت به‌روزرسانی شد")
                 else:
                     print("⚠️ خطا در به‌روزرسانی README")
+                
+                # تولید/به‌روزرسانی JSON ها
+                self.regenerate_json_files()
                 
                 return True
             else:
@@ -238,8 +310,9 @@ class USD2RialsUpdater:
                 return False
         else:
             print("ℹ️ داده جدیدی برای اضافه کردن وجود ندارد")
-            # حتی اگر داده جدید نباشد، README را به‌روزرسانی کن
+            # حتی اگر داده جدید نباشد، README و JSONها را به‌روزرسانی کن
             self.update_readme(latest_data, last_entry)
+            self.regenerate_json_files()
             return True
 
 if __name__ == "__main__":
