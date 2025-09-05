@@ -8,6 +8,8 @@ import os
 from datetime import datetime
 import re
 import json
+import subprocess
+from pathlib import Path
 
 class USD2RialsUpdater:
     def __init__(self, csv_file_path="USD2Rials.csv"):
@@ -22,9 +24,7 @@ class USD2RialsUpdater:
         if not date_str:
             return date_str
         date_str = date_str.strip()
-        # حذف زمان در صورت وجود
         date_part = date_str.split()[0]
-        # یکنواخت‌سازی جداکننده‌ها
         date_part = date_part.replace('-', '/')
         parsed = None
         for fmt in ('%Y/%m/%d', '%m/%d/%Y', '%d/%m/%Y'):
@@ -38,10 +38,8 @@ class USD2RialsUpdater:
                 parts = re.split(r'[/-]', date_part)
                 if len(parts) == 3:
                     if len(parts[0]) == 4 and parts[0].isdigit():
-                        # YYYY/M/D
                         y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
                     elif len(parts[2]) == 4 and parts[2].isdigit():
-                        # فرض کاربر: D/M/YYYY
                         d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
                     else:
                         raise ValueError
@@ -171,17 +169,33 @@ class USD2RialsUpdater:
                 pass
         return ""
 
-    def regenerate_json_files(self, pretty_path: str = "USD2Rials.json", min_path: str = "USD2Rials.min.json") -> bool:
+    def get_csv_row_count(self) -> int:
+        """تعداد ردیف‌های CSV را برمی‌گرداند (بدون هدر)"""
+        try:
+            if not os.path.exists(self.csv_file_path):
+                return 0
+            with open(self.csv_file_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # رد کردن هدر
+                return sum(1 for _ in reader)
+        except Exception as e:
+            print(f"خطا در شمارش ردیف‌های CSV: {e}")
+            return 0
+
+    def regenerate_json_files(self, pretty_path: str = "USD2Rials.json", min_path: str = "USD2Rials.min.json") -> tuple[bool, int]:
         """از روی CSV دو خروجی JSON تولید می‌کند:
         1) فایل غیر فشرده شامل تمام ستون‌ها به صورت آرایه‌ای از آبجکت‌ها
         2) فایل مینیمال به صورت [["YYYY-MM-DD", price], ...]
+        برمی‌گرداند: (موفقیت, تعداد ردیف‌ها)
         """
         try:
             full_rows = []
             min_rows = []
+            row_count = 0
             with open(self.csv_file_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
+                    row_count += 1
                     date_pr = (row.get('date_pr') or '').strip()
                     date_gr = (row.get('date_gr') or '').strip()
                     source = (row.get('source') or '').strip()
@@ -210,12 +224,12 @@ class USD2RialsUpdater:
             with open(pretty_path, 'w', encoding='utf-8') as fpretty:
                 json.dump(full_rows, fpretty, ensure_ascii=False, indent=2)
             print("✅ فایل‌های JSON با موفقیت به‌روزرسانی شدند")
-            return True
+            return True, row_count
         except Exception as e:
             print(f"⚠️ خطا در به‌روزرسانی JSON: {e}")
-            return False
+            return False, 0
     
-    def update_readme(self, latest_data, last_entry=None):
+    def update_readme(self, latest_data, last_entry=None, csv_row_count=0):
         """فایل README را با آخرین اطلاعات به‌روزرسانی می‌کند (RTL + راست‌چین)"""
         try:
             # محاسبه تغییر قیمت
@@ -234,6 +248,9 @@ class USD2RialsUpdater:
             
             if price_change != 0:
                 readme_content += f"  <p><strong>تغییر نسبت به روز قبل:</strong> {price_change:+,} ریال</p>\n"
+            
+            # اضافه کردن تعداد ردیف‌های CSV
+            readme_content += f"  <p><strong>تعداد ردیف‌های CSV:</strong> {csv_row_count:,}</p>\n"
             
             readme_content += """
   <hr />
@@ -274,6 +291,123 @@ class USD2RialsUpdater:
             print(f"خطا در به‌روزرسانی README: {str(e)}")
             return False
     
+    def is_first_day_of_persian_month(self, persian_date: str) -> bool:
+        """بررسی می‌کند که آیا تاریخ شمسی روز اول ماه است یا نه"""
+        try:
+            # فرمت تاریخ شمسی معمولاً به صورت "۱۴۰۳/۰۶/۰۱" است
+            parts = persian_date.replace('/', ' ').replace('-', ' ').split()
+            if len(parts) >= 3:
+                day = parts[2].strip()
+                # تبدیل اعداد فارسی به انگلیسی
+                persian_to_english = str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789')
+                day_english = day.translate(persian_to_english)
+                return day_english == '01' or day_english == '1'
+            return False
+        except Exception as e:
+            print(f"خطا در بررسی روز اول ماه: {e}")
+            return False
+    
+    def create_github_release(self, latest_data, csv_row_count: int) -> bool:
+        """ایجاد GitHub Release با فایل‌های CSV و JSON"""
+        try:
+            github_token = os.getenv('GITHUB_TOKEN')
+            if not github_token:
+                print("⚠️ GITHUB_TOKEN تنظیم نشده است")
+                return False
+            
+            # تولید نام تگ با فرمت تاریخ میلادی و شمسی
+            gregorian_date = latest_data['date_gr']
+            persian_date = latest_data['date_pr']
+            
+            # تبدیل تاریخ میلادی به فرمت YYYYMMDD
+            try:
+                dt = datetime.strptime(gregorian_date, "%m/%d/%Y")
+                gregorian_formatted = dt.strftime("%Y%m%d")
+            except:
+                gregorian_formatted = gregorian_date.replace('/', '')
+            
+            # تبدیل تاریخ شمسی به فرمت YYYYMMDD
+            persian_formatted = persian_date.replace('/', '').replace('-', '')
+            
+            tag_name = f"{gregorian_formatted}-{persian_formatted}"
+            release_name = f"به‌روزرسانی {persian_date} - {gregorian_date}"
+            
+            release_body = f"""به‌روزرسانی شده تا {persian_date} - {gregorian_date}
+تعداد ردیف: {csv_row_count:,}"""
+            
+            # ایجاد release با GitHub CLI
+            cmd = [
+                'gh', 'release', 'create', tag_name,
+                '--title', release_name,
+                '--notes', release_body,
+                'USD2Rials.csv',
+                'USD2Rials.json',
+                'USD2Rials.min.json'
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+            
+            if result.returncode == 0:
+                print(f"✅ GitHub Release {tag_name} با موفقیت ایجاد شد")
+                return True
+            else:
+                print(f"❌ خطا در ایجاد GitHub Release: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            print(f"خطا در ایجاد GitHub Release: {e}")
+            return False
+    
+    def send_telegram_message(self, latest_data, csv_row_count: int) -> bool:
+        """ارسال پیام تلگرام با فایل‌های پروژه"""
+        try:
+            bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+            chat_id = os.getenv('TELEGRAM_CHAT_ID')
+            
+            if not bot_token or not chat_id:
+                print("⚠️ TELEGRAM_BOT_TOKEN یا TELEGRAM_CHAT_ID تنظیم نشده است")
+                return False
+            
+            message = f"""به‌روزرسانی تا {latest_data['date_pr']} - {latest_data['date_gr']}
+تعداد ردیف‌های CSV: {csv_row_count:,}"""
+            
+            # ارسال پیام متنی
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            data = {
+                'chat_id': chat_id,
+                'text': message
+            }
+            
+            response = requests.post(url, data=data)
+            if response.status_code != 200:
+                print(f"خطا در ارسال پیام تلگرام: {response.text}")
+                return False
+            
+            # ارسال فایل CSV
+            url_doc = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+            
+            files_to_send = ['USD2Rials.csv', 'USD2Rials.json']
+            
+            for file_path in files_to_send:
+                if os.path.exists(file_path):
+                    with open(file_path, 'rb') as file:
+                        files = {'document': file}
+                        data = {'chat_id': chat_id}
+                        response = requests.post(url_doc, data=data, files=files)
+                        
+                        if response.status_code == 200:
+                            print(f"✅ فایل {file_path} با موفقیت ارسال شد")
+                        else:
+                            print(f"❌ خطا در ارسال فایل {file_path}: {response.text}")
+                else:
+                    print(f"⚠️ فایل {file_path} یافت نشد")
+            
+            return True
+            
+        except Exception as e:
+            print(f"خطا در ارسال پیام تلگرام: {e}")
+            return False
+    
     def run(self):
         """اجرای فرآیند اصلی به‌روزرسانی"""
         print("🔄 شروع فرآیند به‌روزرسانی قیمت دلار...")
@@ -290,19 +424,29 @@ class USD2RialsUpdater:
         last_entry = self.get_last_entry()
         
         # بررسی جدید بودن داده
-        if self.is_new_data(latest_data, last_entry):
+        is_new_data = self.is_new_data(latest_data, last_entry)
+        
+        if is_new_data:
             # اضافه کردن به CSV
             if self.append_to_csv(latest_data):
                 print("✅ داده جدید با موفقیت به فایل CSV اضافه شد")
                 
-                # به‌روزرسانی README (RTL)
-                if self.update_readme(latest_data, last_entry):
+                # تولید/به‌روزرسانی JSON ها و دریافت تعداد ردیف‌ها
+                json_success, csv_row_count = self.regenerate_json_files()
+                
+                # به‌روزرسانی README با تعداد ردیف‌ها
+                if self.update_readme(latest_data, last_entry, csv_row_count):
                     print("✅ فایل README با موفقیت به‌روزرسانی شد")
                 else:
                     print("⚠️ خطا در به‌روزرسانی README")
                 
-                # تولید/به‌روزرسانی JSON ها
-                self.regenerate_json_files()
+                # ایجاد GitHub Release برای داده‌های جدید
+                self.create_github_release(latest_data, csv_row_count)
+                
+                # بررسی روز اول ماه شمسی برای ارسال تلگرام
+                if self.is_first_day_of_persian_month(latest_data['date_pr']):
+                    print("📅 روز اول ماه شمسی تشخیص داده شد - ارسال پیام تلگرام")
+                    self.send_telegram_message(latest_data, csv_row_count)
                 
                 return True
             else:
@@ -311,8 +455,14 @@ class USD2RialsUpdater:
         else:
             print("ℹ️ داده جدیدی برای اضافه کردن وجود ندارد")
             # حتی اگر داده جدید نباشد، README و JSONها را به‌روزرسانی کن
-            self.update_readme(latest_data, last_entry)
-            self.regenerate_json_files()
+            json_success, csv_row_count = self.regenerate_json_files()
+            self.update_readme(latest_data, last_entry, csv_row_count)
+            
+            # بررسی روز اول ماه شمسی برای ارسال تلگرام (حتی اگر داده جدید نباشد)
+            if self.is_first_day_of_persian_month(latest_data['date_pr']):
+                print("📅 روز اول ماه شمسی تشخیص داده شد - ارسال پیام تلگرام")
+                self.send_telegram_message(latest_data, csv_row_count)
+            
             return True
 
 if __name__ == "__main__":
