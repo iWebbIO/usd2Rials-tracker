@@ -250,7 +250,7 @@ class USD2RialsUpdater:
                 readme_content += f"  <p><strong>تغییر نسبت به روز قبل:</strong> {price_change:+,} ریال</p>\n"
             
             # اضافه کردن تعداد ردیف‌های CSV
-            readme_content += f"  <p><strong>تعداد ردیف‌های CSV:</strong> {csv_row_count:,}</p>\n"
+            readme_content += f"  <p><strong>تعداد ردیف‌:</strong> {csv_row_count:,}</p>\n"
             
             readme_content += """
   <hr />
