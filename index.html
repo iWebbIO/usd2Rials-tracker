@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USD2RIALS UI</title>
+    <!-- Chart.js and Date Adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <!-- Zoom Plugin for Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom/dist/chartjs-plugin-zoom.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://rsms.me/inter/inter.css');
+        html, body { 
+            font-family: 'Inter', sans-serif; 
+            height: 100%;
+            overflow: hidden;
+        }
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .chart-wrapper {
+            flex-grow: 1;
+            position: relative;
+        }
+        canvas {
+            position: relative;
+            width: 100%; height: 100%;
+            /* **IMPROVEMENT**: Interactive cursor feedback */
+            cursor: grab;
+            user-select: none;
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a202c; }
+        ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #718096; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300">
+    <div class="main-container">
+        <!-- Header -->
+        <header class="text-center p-4 border-b border-gray-700 flex-shrink-0">
+            <h1 class="text-2xl font-bold text-white">USD2RIALS UI</h1>
+        </header>
+
+        <!-- Main Content -->
+        <div class="flex flex-1 overflow-hidden">
+            <!-- Sidebar with Controls and Analysis -->
+            <aside class="w-80 bg-gray-800 p-6 space-y-6 overflow-y-auto flex-shrink-0">
+                <div>
+                    <h2 class="text-xl font-bold text-white mb-4">Analysis</h2>
+                    <div id="stats-panel" class="space-y-4 opacity-0 transition-opacity duration-500">
+                        <div>
+                            <p class="text-sm text-gray-400">Latest Price</p>
+                            <p id="latest-price" class="text-2xl font-semibold text-indigo-400">-</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-400">Highest (in range)</p>
+                            <p id="high-price" class="text-2xl font-semibold text-green-400">-</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-400">Lowest (in range)</p>
+                            <p id="low-price" class="text-2xl font-semibold text-red-400">-</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-400">Average (in range)</p>
+                            <p id="avg-price" class="text-2xl font-semibold text-yellow-400">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border-t border-gray-700 pt-6">
+                    <h2 class="text-xl font-bold text-white mb-4">Controls</h2>
+                    <div class="space-y-4">
+                        <!-- Date Range Filters, Quick Select, Chart Type -->
+                        <div>
+                            <label for="startDate" class="text-sm font-medium">Start Date</label>
+                            <input type="date" id="startDate" class="mt-1 w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label for="endDate" class="text-sm font-medium">End Date</label>
+                            <input type="date" id="endDate" class="mt-1 w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div>
+                             <label class="text-sm font-medium">Quick Select</label>
+                             <div class="grid grid-cols-2 gap-2 mt-1">
+                                <button class="time-range-btn bg-gray-700 hover:bg-indigo-600 p-2 rounded-md text-sm" data-range="1m">1M</button>
+                                <button class="time-range-btn bg-gray-700 hover:bg-indigo-600 p-2 rounded-md text-sm" data-range="6m">6M</button>
+                                <button class="time-range-btn bg-gray-700 hover:bg-indigo-600 p-2 rounded-md text-sm" data-range="1y">1Y</button>
+                                <button class="time-range-btn bg-gray-700 hover:bg-indigo-600 p-2 rounded-md text-sm" data-range="all">All</button>
+                             </div>
+                        </div>
+                        <div>
+                            <label for="chartType" class="text-sm font-medium">Chart Type</label>
+                            <select id="chartType" class="mt-1 w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white p-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="line">Line</option>
+                                <option value="bar">Bar</option>
+                            </select>
+                        </div>
+                        <div class="flex space-x-3 pt-2">
+                             <button id="filter" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition-colors">Apply</button>
+                             <button id="reset" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition-colors">Reset View</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Chart Area -->
+            <main class="flex-1 bg-gray-900 p-4">
+                <div class="chart-wrapper">
+                    <div id="loader" class="absolute inset-0 flex justify-center items-center bg-gray-900 z-10">
+                        <div class="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-indigo-500"></div>
+                    </div>
+                    <canvas id="myChart"></canvas>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        const url = "https://raw.githubusercontent.com/alirezach/usd2Rials-tracker/refs/heads/main/USD2Rials.json";
+        let chart;
+        let allData = [];
+
+        const loader = document.getElementById('loader');
+        const filterBtn = document.getElementById('filter');
+        const resetBtn = document.getElementById('reset');
+        const chartTypeSelect = document.getElementById('chartType');
+        const timeRangeBtns = document.querySelectorAll('.time-range-btn');
+        const statsPanel = document.getElementById('stats-panel');
+        const latestPriceEl = document.getElementById('latest-price');
+        const highPriceEl = document.getElementById('high-price');
+        const lowPriceEl = document.getElementById('low-price');
+        const avgPriceEl = document.getElementById('avg-price');
+        const formatCurrency = (value) => value.toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+        async function fetchData() {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error('Failed to load data');
+                }
+                const data = await response.json();
+                allData = data.map(item => ({ x: new Date(item.date_gr).getTime(), y: item.price_avg })).sort((a, b) => a.x - b.x);
+            } catch (error) {
+                console.error("Failed to fetch data:", error);
+                loader.innerHTML = '<p class="text-red-500">Failed to load data. Ensure USD2Rials.json is present.</p>';
+                return;
+            }
+            loader.style.display = 'none';
+            statsPanel.classList.remove('opacity-0');
+
+            // Set default date range to full data after data is loaded
+            if (allData.length > 0) {
+                const startDate = new Date(allData[0].x);
+                const endDate = new Date(allData[allData.length - 1].x);
+                document.getElementById('startDate').valueAsDate = startDate;
+                document.getElementById('endDate').valueAsDate = endDate;
+            }
+
+            return allData;
+        }
+
+        function createChart(data) {
+            const ctx = document.getElementById('myChart').getContext('2d');
+            Chart.defaults.color = '#a0aec0';
+
+            // **IMPROVEMENT**: Gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.5)');
+            gradient.addColorStop(1, 'rgba(99, 102, 241, 0)');
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: { datasets: [{
+                    label: 'USD to Rials', data: data,
+                    borderColor: 'rgb(99, 102, 241)', backgroundColor: gradient,
+                    tension: 0.1, pointRadius: 0, borderWidth: 2, fill: true
+                }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false, parsing: false,
+                    // **IMPROVEMENT**: Re-enabled fast, smooth animations
+                    animation: { duration: 250, easing: 'easeOutQuad' },
+                    scales: {
+                        x: { type: 'time', time: { unit: 'year' }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { source: 'auto', maxRotation: 0, autoSkip: true } },
+                        y: { grid: { color: 'rgba(255, 255, 255, 0.1)' } }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        decimation: { enabled: true, algorithm: 'lttb', samples: 200 },
+                        tooltip: {
+                            mode: 'index', intersect: false, backgroundColor: '#1f2937',
+                            titleColor: '#e2e8f0', bodyColor: '#cbd5e1', padding: 10,
+                            callbacks: {
+                                title: ctx => new Date(ctx[0].parsed.x).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+                                label: ctx => `Price: ${formatCurrency(ctx.parsed.y)}`
+                            }
+                        },
+                        zoom: {
+                            pan: { enabled: true, mode: 'x', threshold: 5 },
+                            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+                        }
+                    }
+                }
+            });
+            updateChartView(data);
+        }
+
+        function updateChartView(data, isReset = false) {
+            chart.data.datasets[0].data = data;
+            
+            // **IMPROVEMENT**: Y-axis now auto-scales to fit the filtered data perfectly
+            if (data.length > 0) {
+                const prices = data.map(d => d.y);
+                const yMin = Math.min(...prices);
+                const yMax = Math.max(...prices);
+                const yPadding = (yMax - yMin) * 0.1;
+                chart.options.scales.y.min = yMin - yPadding;
+                chart.options.scales.y.max = yMax + yPadding;
+            }
+            
+            if (isReset) {
+                // Clear any manual min/max to allow auto-scaling on the full dataset
+                delete chart.options.scales.y.min;
+                delete chart.options.scales.y.max;
+            }
+
+            updateStats(data);
+            chart.update(); // Use default animation
+        }
+
+        function updateStats(data) {
+            if (data.length === 0) return;
+            const prices = data.map(d => d.y);
+            latestPriceEl.textContent = formatCurrency(prices[prices.length - 1]);
+            highPriceEl.textContent = formatCurrency(Math.max(...prices));
+            lowPriceEl.textContent = formatCurrency(Math.min(...prices));
+            avgPriceEl.textContent = formatCurrency(prices.reduce((a, b) => a + b, 0) / prices.length);
+
+            // Animate stats reveal
+            statsPanel.style.opacity = '0';
+            setTimeout(() => {
+                statsPanel.style.transition = 'opacity 0.3s ease-in-out';
+                statsPanel.style.opacity = '1';
+            }, 100);
+        }
+
+        function applyFilters() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            let filteredData = allData;
+            if (startDate) filteredData = filteredData.filter(d => d.x >= new Date(startDate).getTime());
+            if (endDate) {
+                const endTimestamp = new Date(endDate);
+                endTimestamp.setHours(23, 59, 59, 999);
+                filteredData = filteredData.filter(d => d.x <= endTimestamp.getTime());
+            }
+            chart.resetZoom();
+            updateChartView(filteredData);
+        }
+        
+        filterBtn.addEventListener('click', applyFilters);
+
+        resetBtn.addEventListener('click', () => {
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+            chartTypeSelect.value = 'line';
+            chart.config.type = 'line';
+            chart.data.datasets[0].borderWidth = 2;
+            chart.data.datasets[0].pointRadius = 0;
+            chart.resetZoom();
+            updateChartView(allData, true);
+        });
+
+        chartTypeSelect.addEventListener('change', (e) => {
+            chart.config.type = e.target.value;
+            // Adjust styles for bar chart
+            if (e.target.value === 'bar') {
+                chart.data.datasets[0].borderWidth = 1;
+                chart.data.datasets[0].pointRadius = 2;
+            } else {
+                chart.data.datasets[0].borderWidth = 2;
+                chart.data.datasets[0].pointRadius = 0;
+            }
+            chart.update();
+        });
+
+        timeRangeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const range = btn.dataset.range;
+                if (range === 'all') {
+                    document.getElementById('startDate').value = '';
+                    document.getElementById('endDate').value = '';
+                    chart.resetZoom();
+                    updateChartView(allData, true);
+                    return;
+                }
+                const endDate = new Date();
+                const startDate = new Date();
+                const num = parseInt(range);
+                if (range.includes('m')) startDate.setMonth(endDate.getMonth() - num);
+                else if (range.includes('y')) startDate.setFullYear(endDate.getFullYear() - num);
+
+                document.getElementById('startDate').valueAsDate = startDate;
+                document.getElementById('endDate').valueAsDate = endDate;
+                applyFilters();
+            });
+        });
+
+        fetchData().then(data => {
+            if (data) createChart(data);
+        });
+    </script>
+</body>
+</html>
