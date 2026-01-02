@@ -52678,5 +52678,11 @@
     "date_gr": "12/31/2025",
     "source": "tgju",
     "price_avg": 1376450
+  },
+  {
+    "date_pr": "1404/10/11",
+    "date_gr": "1/1/2026",
+    "source": "tgju",
+    "price_avg": 1348600
   }
 ]
